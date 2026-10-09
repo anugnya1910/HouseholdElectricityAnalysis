@@ -1,0 +1,229 @@
+---
+title: "Household Electricity Consumption Pattern Analysis and Peak Demand Prediction Using R"
+subtitle: "Introduction to Data Science: Case Study Report"
+author: "Artificial Intelligence and Data Science"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
+    theme: flatly
+    self_contained: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, out.width = "100%")
+root <- if (file.exists("../outputs/tables")) ".." else "."
+tab <- function(n) readr::read_csv(file.path(root, "outputs/tables", paste0(n, ".csv")), show_col_types = FALSE)
+fig <- function(n) knitr::include_graphics(file.path(root, "outputs/figures", paste0(n, ".png")))
+show <- function(df, digits = 3) knitr::kable(df, digits = digits, format = "html",
+                                              table.attr = 'class="table table-striped table-condensed"')
+thr  <- tab("peak_threshold")$peak_threshold
+reg  <- tab("regression_model_comparison")
+cls  <- tab("classification_model_comparison")
+clu  <- tab("cluster_profiles")
+audit <- tab("data_quality_audit")
+```
+
+# Introduction
+
+Electricity distribution planning depends on the ability to anticipate which households will draw
+heavy load. This report analyses a household electricity dataset of **45,345 household-month records**
+across **16 Indian cities** and **32 providers**. It has three objectives: to describe consumption
+patterns, to model the drivers of monthly consumption, and to predict whether a household-month falls
+into the **peak-demand** category.
+
+Because the dataset records monthly totals rather than interval (hourly) meter readings, peak demand
+is defined at the household-month level: a record is classed as peak demand when its monthly
+consumption is at least **`r thr` hours**, the 75th percentile of the distribution.
+
+All analysis is reproducible from the scripts in the `R/` directory and follows the topics of the
+course syllabus, as mapped in `docs/syllabus_mapping.md`.
+
+# Data and Preparation
+
+```{r audit}
+show(audit)
+```
+
+The audit shows no missing values and no duplicate records. The variable `MotorPump` is constant
+(zero in every record) and was removed. The recorded bill was verified to equal monthly hours
+multiplied by the tariff rate to numerical precision. This identity has a modelling consequence:
+tariff and bill are excluded from the predictors of consumption, since including them would leak the
+target.
+
+Three variables were engineered: `DaysInMonth` (calendar control), `Season`, and the binary
+`PeakDemand` label. A stratified sample reproduces the population peak share, confirming that
+sampling does not distort the class balance.
+
+# Exploratory Analysis
+
+```{r f1}
+fig("01_consumption_distribution")
+```
+
+Monthly consumption is symmetric and approximately bell shaped, centred near 515 hours.
+
+```{r f2}
+fig("02_monthly_profile")
+```
+
+Mean consumption varies with the number of days in the month. February (28 days) has the lowest
+mean and the lowest peak share, while 31-day months have the highest.
+
+```{r f3}
+fig("08_appliance_scatter")
+```
+
+```{r f4}
+fig("04_correlation_matrix")
+```
+
+Television, fan, refrigerator and monitor usage each correlate positively with consumption.
+The correlation between `ElectricityBill` and `MonthlyHours` is high, while the bill also
+depends on the tariff.
+
+```{r f5}
+fig("05_bill_by_city")
+```
+
+Differences in mean bill between cities are driven by the tariff rate rather than by usage:
+mean consumption is nearly identical across cities (see `outputs/tables/city_summary.csv`).
+
+```{r f6}
+fig("07_peak_heatmap")
+```
+
+# Unsupervised Learning
+
+## Household segmentation
+
+```{r kmsel}
+fig("09_kmeans_selection")
+```
+
+The silhouette criterion selects **three** segments.
+
+```{r clu}
+show(clu)
+```
+
+```{r clufig}
+fig("11_cluster_profile_heatmap")
+```
+
+The segments differ mainly in monitor and fan usage. The segment with the heaviest monitor use has
+a peak share of `r scales::percent(clu$PeakShare[clu$Cluster == 1], 0.1)`, compared with
+`r scales::percent(clu$PeakShare[clu$Cluster == 3], 0.1)` for the segment with the lowest fan and
+refrigerator levels.
+
+## Association rules
+
+```{r rules}
+fig("12_association_rules")
+```
+
+Combinations of high fan, television and monitor usage have a lift above 2 for peak demand,
+meaning such households are more than twice as likely to be peak consumers as the average household.
+
+# Regression Models for Consumption
+
+```{r reg}
+show(reg)
+```
+
+```{r regfig}
+fig("15_regression_comparison")
+```
+
+The linear model and the generalized additive model achieve essentially identical accuracy
+(R-squared of about `r round(reg$R2[1], 2)`), which indicates that the relationship between appliance usage
+and consumption is close to linear. Bagged trees and random forests do not improve on the linear
+model. The remaining unexplained variation is not captured by the available predictors.
+
+```{r avp}
+fig("13_actual_vs_predicted")
+```
+
+```{r gam}
+fig("17_gam_smooth_effects")
+```
+
+```{r coef}
+show(tab("linear_model_coefficients") |> dplyr::select(term, estimate, std.error, p.value, conf.low, conf.high))
+```
+
+Each additional air conditioner adds about 30 hours of monthly consumption, the largest per-unit effect.
+
+# Peak Demand Classification
+
+```{r cls}
+show(cls)
+```
+
+```{r roc}
+fig("18_roc_curves")
+```
+
+Logistic regression achieves the highest area under the ROC curve (`r round(cls$AUC[1], 3)`). With the default
+0.5 threshold, recall is modest because peak households are a minority class. The threshold
+analysis below shows the trade-off available to an operator who prefers to detect more peak households.
+
+```{r thr}
+fig("20_threshold_analysis")
+```
+
+```{r or}
+fig("21_odds_ratios")
+```
+
+# Model Interpretation with LIME
+
+```{r lime}
+fig("22_lime_explanations")
+```
+
+LIME explanations show which appliance levels push an individual prediction towards or away from
+peak demand. Permutation importance gives the global view.
+
+```{r perm}
+fig("23_permutation_importance")
+```
+
+Television, monitor, fan and air conditioner usage drive predictions; the city has no measurable
+predictive contribution once appliance usage is known.
+
+# Text Mining Supplement
+
+The provider name is the only text field. Term frequencies of provider names are almost identical in
+the peak and non-peak segments, so tf-idf scores are zero: provider vocabulary carries no
+information about demand. This is reported as a negative result.
+
+```{r terms}
+fig("24_provider_terms")
+```
+
+# Conclusions
+
+1. Consumption is driven by appliance usage and by the length of the month; city and provider add no
+   predictive information.
+2. Billing differences between cities reflect tariff rates, not behaviour.
+3. A linear model explains roughly `r scales::percent(reg$R2[1], 1)` of the variance in monthly consumption, and
+   logistic regression separates peak from non-peak households with an AUC of `r round(cls$AUC[1], 2)`.
+4. High combined use of fans, televisions and monitors identifies the households most likely to be
+   peak consumers.
+
+# Limitations
+
+* The data contain monthly totals, not interval readings; true time-of-day peaks cannot be studied.
+* The appliance variables are usage levels whose exact units are not documented in the source file.
+* The near-uniform distribution of cities, months and providers suggests the dataset may be synthetic or
+  heavily standardised, which limits how far the findings generalise to real households.
+* Roughly 43% of variance remains unexplained by the available features.
+
+# Reproducibility
+
+```{r session}
+sessionInfo()
+```

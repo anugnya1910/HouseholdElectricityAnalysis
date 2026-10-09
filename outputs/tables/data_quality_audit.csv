@@ -1,0 +1,13 @@
+Variable,Type,Missing,DistinctValues,Min,Max
+Fan,numeric,0,19,5,23
+Refrigerator,numeric,0,7,17,23
+AirConditioner,numeric,0,4,0,3
+Television,numeric,0,20,3,22
+Monitor,numeric,0,3,1,12
+MotorPump,numeric,0,1,0,0
+Month,numeric,0,12,1,12
+City,character,0,16,NA,NA
+Company,character,0,32,NA,NA
+MonthlyHours,numeric,0,748,95,926
+TariffRate,numeric,0,16,7.4,9.3
+ElectricityBill,numeric,0,8187,807.5,8286.300000000001
